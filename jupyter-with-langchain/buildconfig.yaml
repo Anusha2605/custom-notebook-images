@@ -1,0 +1,35 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: custom-notebook-image
+  namespace: redhat-ods-applications
+spec:
+  runPolicy: Serial
+  source:
+    type: Git
+    git:
+      uri: "https://github.com/Anusha2605/custom-notebook-images.git"
+      ref: main              # change to your branch or tag
+    contextDir: "jupyter-with-langchain"          # folder containing the Dockerfile
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile   # optional if named 'Dockerfile'
+      noCache: false
+     # from:
+     #   kind: DockerImage
+     #   name: "registry.redhat.io/rhoai/odh-workbench-jupyter-minimal-cpu-py312-rhel9:latest"
+  output:
+    to:
+      kind: DockerImage
+      name: "quay.io/rh_ee_asathish/jupyter-langchain:v1.0.0"
+    pushSecret:
+      name: dockercreds
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+

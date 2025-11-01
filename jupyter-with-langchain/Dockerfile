@@ -8,7 +8,7 @@ COPY Pipfile.lock ./
 RUN echo "Installing softwares and packages" && \
     # Install Python packages \
     micropipenv install && \
-    rm -f ./Pipfile.lock
+    rm -f ./Pipfile.lock \
     # Fix permissions to support pip in OpenShift environments \
     chmod -R g+w /opt/app-root/lib/python3.9/site-packages && \
     fix-permissions /opt/app-root -P
