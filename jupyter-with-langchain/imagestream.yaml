@@ -2,6 +2,7 @@ kind: ImageStream
 apiVersion: image.openshift.io/v1
 metadata:
   annotations:
+    opendatahub.io/notebook-image-creator: anusha
     opendatahub.io/notebook-image-desc: A custom Jupyter Notebook image 
     opendatahub.io/notebook-image-name: Minimal Jupyter | Langchain 
   name: jupyter-langchain-custom-image
@@ -26,7 +27,7 @@ spec:
             {"name": "langgraph-prebuilt", "version": "1.0.2"},
             {"name": "langgraph-sdk", "version": "0.2.9"},
             {"name": "langsmith", "version": "0.4.38"},
-            {"name": "lxml", "version": "6.0.2"},
+            {"name": "lxml", "version": "6.0.2"}
           ]
         opendatahub.io/notebook-software: '[{"name":"Python","version":"v3.11"}]' 
         opendatahub.io/workbench-image-recommended: 'true' 
