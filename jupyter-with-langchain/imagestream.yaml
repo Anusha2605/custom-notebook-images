@@ -33,7 +33,7 @@ spec:
         opendatahub.io/workbench-image-recommended: 'true' 
       from:
         kind: DockerImage
-        name: 'quay.io/rh_ee_asathish/jupyter-langchain:v1.0.0' 
+        name: 'quay.io/rh_ee_asathish/jupyter-langchain:v1.0.1' 
       importPolicy:
         importMode: Legacy
       referencePolicy:

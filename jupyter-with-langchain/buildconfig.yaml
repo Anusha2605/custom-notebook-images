@@ -22,7 +22,7 @@ spec:
   output:
     to:
       kind: DockerImage
-      name: "quay.io/rh_ee_asathish/jupyter-langchain:v1.0.0"
+      name: "quay.io/rh_ee_asathish/jupyter-langchain:v1.0.1"
     pushSecret:
       name: dockercreds
   resources:
