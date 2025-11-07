@@ -1,0 +1,37 @@
+# environment.yml
+#
+# Reference micromamba environment spec used to bootstrap the "ds" environment.
+# This file documents the base conda environment layout. The actual image build
+# uses micromamba directly in the Dockerfile instead of relying on this file at
+# runtime, but keeping this here:
+# - clarifies pinned Python version
+# - shows core tools that MUST exist before pip installs project libraries
+#
+# NOTE:
+#   Project / org / team specific AI/ML/GenAI libraries (transformers, langchain,
+#   etc.) are intentionally NOT baked into this file. Instead they are provided
+#   via requirements.txt at build time, and installed with:
+#       micromamba run -n ds pip install -r requirements.txt
+#
+name: ds
+channels:
+  - conda-forge
+dependencies:
+  # Core runtime
+  - python=3.11
+  - pip
+  - ipykernel
+
+  # We keep the conda env minimal and rely on pip for:
+  # - scientific stack (numpy, pandas, scipy, scikit-learn, matplotlib, seaborn, xgboost, lightgbm)
+  # - lint/format tools (black, ruff)
+  # - GPU/CPU torch + torchvision (CPU or CUDA via ENABLE_CUDA in Dockerfile)
+  # - GenAI stack (transformers, accelerate, datasets, sentencepiece)
+  #
+  # ipykernel is installed here so VS Code Python/Jupyter extensions
+  # can discover the "ds" kernel out of the box.
+  #
+  # After creating this env, the Dockerfile runs:
+  #   python -m ipykernel install --sys-prefix --name ds --display-name "Python (ds)"
+  #
+  # This registers the kernel so notebooks in VS Code can select it.
