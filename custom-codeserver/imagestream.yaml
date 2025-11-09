@@ -1,0 +1,43 @@
+kind: ImageStream
+apiVersion: image.openshift.io/v1
+metadata:
+  annotations:
+    opendatahub.io/notebook-image-creator: anusha
+    opendatahub.io/notebook-image-desc: A custom Code Server Notebook image 
+    opendatahub.io/notebook-image-name: Custom CodeServer | Java | CUDA
+  name: custom-codeserver-cuda-py311-java
+  namespace: redhat-ods-applications 
+  labels: 
+    app.kubernetes.io/created-by: byon
+    opendatahub.io/dashboard: 'true'
+    opendatahub.io/notebook-image: 'true'
+spec:
+  lookupPolicy:
+    local: true
+  tags:
+    - name: '1.0' 
+      annotations: 
+        opendatahub.io/notebook-python-dependencies: |
+          [
+            {"name": "black", "version": "25.9.0"},
+            {"name": "ipywidgets", "version": "8.1.8"},
+            {"name": "lightgbm", "version": "4.6.0"},
+            {"name": "matplotlib", "version": "3.10.7"},
+            {"name": "matplotlib-inline", "version": "0.2.1"},
+            {"name": "numpy", "version": "2.2.6"},
+            {"name": "pandas", "version": "2.3.3"},
+            {"name": "ruff", "version": "0.14.3"},
+            {"name": "scikit-learn", "version": "1.7.2"},
+            {"name": "scipy", "version": "1.16.3"},
+            {"name": "seaborn", "version": "0.13.2"},
+            {"name": "xgboost", "version": "3.1.1"}
+          ]
+        opendatahub.io/notebook-software: '[{"name":"Python","version":"v3.11"}]' 
+        opendatahub.io/workbench-image-recommended: 'true' 
+      from:
+        kind: DockerImage
+        name: 'quay.io/rh_ee_asathish/codeserver-with-cuda-py311:v1.0.0' 
+      importPolicy:
+        importMode: Legacy
+      referencePolicy:
+        type: Source
