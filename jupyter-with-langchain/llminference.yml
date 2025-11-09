@@ -1,0 +1,44 @@
+apiVersion: serving.kserve.io/v1alpha1
+kind: LLMInferenceService
+metadata:
+  name: granite-3-3-2b-instruct
+  namespace: test
+spec:
+  model:
+    uri: oci://quay.io/redhat-ai-services/modelcar-catalog:granite-3.3-2b-instruct
+    name: granite-3-3-2b-instruct
+  # Three replicas for load balancing
+  replicas: 1
+  router:
+    scheduler: { }  # Default scheduler with default load balancing
+    route: { }
+    gateway:
+      refs:
+      - name: openshift-ai-inference
+        namespace: openshift-ingress
+  template:
+    tolerations:
+      - key: nvidia.com/gpu
+        effect: NoSchedule
+        operator: Exists
+    containers:
+      - name: main
+        #image: 'registry.redhat.io/rhoai/odh-vllm-cpu-rhel9@sha256:bae57975dfe153afc799e868e6a27ec1e502f68d4337a74dc6455a6bc326d02c'
+        resources:
+          limits:
+            cpu: '10'
+            memory: 32Gi
+            nvidia.com/gpu: "1"
+          requests:
+            cpu: '6'
+            memory: 16Gi
+            nvidia.com/gpu: "1"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+            scheme: HTTPS
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 30
+          failureThreshold: 5
