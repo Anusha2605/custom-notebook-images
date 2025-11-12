@@ -16,15 +16,44 @@ RUN dnf -y install \
       -o /usr/bin/tini && chmod +x /usr/bin/tini && \
     dnf clean all && rm -rf /var/cache/dnf
 
+RUN localedef -f UTF-8 -i en_US en_US.UTF-8 || true
+ENV LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8
+
 # ---------- Copy JDBC driver ----------
 COPY ojdbc17.jar /opt/java/ojdbc17.jar
 
+#---------- Add code server extension -------------#
+COPY --chown=1001:0 ./utils /opt/app-root/bin/utils/
+
+# Create and install the extensions though build-time on a temporary directory. Later this directory will copied on the `/opt/app-root/src/.local/share/code-server/extensions` via run-code-server.sh file when it starts up.
+RUN for ext in \
+    "cweijan.dbclient-jdbc-1.4.2.vsix" \
+    "ms-azuretools.vscode-containers-2.1.0.vsix" \
+#    "ms-python.vscode-pylance-2025.8.1.vsix" \
+    "cweijan.vscode-mysql-client2-8.4.2.vsix" \
+    "ms-azuretools.vscode-docker-2.0.0.vsix" \
+    "redhat.vscode-yaml-1.19.1.vsix" \
+    "eamodio.gitlens-17.7.0.vsix" \
+    "ms-mssql.mssql-1.9.0.vsix" \
+    "yzhang.markdown-all-in-one-3.6.2.vsix" \
+
+    ; do \
+        code-server --extensions-dir /opt/app-root/extensions-temp --install-extension /opt/app-root/bin/utils/$ext || true ; \
+    done
+
 # ---------- Environment variables ----------
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk \
-    PATH=$JAVA_HOME/bin:$PATH \
+    PATH=$JAVA_HOME/bin:/opt/conda/envs/ds/bin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH \
     CLASSPATH=/opt/java/ojdbc17.jar:$CLASSPATH \
+    LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
     MAMBA_ROOT_PREFIX=/opt/conda \
     MAMBA_EXE=/usr/local/bin/micromamba
+
+#------------ Git configuration defaults -----------#
+RUN git config --system --add safe.directory '*' && \
+    git lfs install --system --skip-repo
 
 # ---------- Install micromamba ----------
 RUN curl -fsSL https://micromamba.snakepit.net/api/micromamba/linux-64/${MAMBA_VERSION} \
@@ -58,6 +87,7 @@ RUN if [ -s /tmp/requirements.txt ]; then \
     micromamba clean --all --yes
 
 # ---------- Permissions for OpenShift ----------
+
 RUN chgrp -R 0 /opt/java /opt/conda && chmod -R g+rwX /opt/java /opt/conda
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
