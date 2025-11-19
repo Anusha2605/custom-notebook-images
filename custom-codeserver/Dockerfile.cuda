@@ -1,0 +1,187 @@
+# ---------- Base image ----------
+ARG BASE_IMAGE=registry.redhat.io/rhoai/odh-workbench-codeserver-datascience-cpu-py311-rhel9@sha256:755f8dacf495f6abb29233edb422ca473ba82cc23370d4fcbaa4f938e90a9c25
+FROM ${BASE_IMAGE} as base
+
+# ---------- Version arguments ----------
+ARG TINI_VERSION=0.19.0
+ARG MAMBA_VERSION=1.5.8
+ARG ENABLE_CUDA=true
+
+USER root
+
+# ---------- Install OS packages and tini ----------
+RUN dnf -y install \
+      diffutils nano krb5-workstation java-17-openjdk java-17-openjdk-devel maven && \
+    curl -fsSL https://github.com/krallin/tini/releases/download/v${TINI_VERSION}/tini-static-amd64 \
+      -o /usr/bin/tini && chmod +x /usr/bin/tini && \
+    dnf clean all && rm -rf /var/cache/dnf
+
+# ---------- Copy JDBC driver ----------
+COPY ojdbc17.jar /opt/java/ojdbc17.jar
+
+# ---------- Environment variables ----------
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk \
+    PATH=$JAVA_HOME/bin:$PATH \
+    CLASSPATH=/opt/java/ojdbc17.jar:$CLASSPATH \
+    MAMBA_ROOT_PREFIX=/opt/conda \
+    MAMBA_EXE=/usr/local/bin/micromamba
+
+# ---------- Install micromamba ----------
+RUN curl -fsSL https://micromamba.snakepit.net/api/micromamba/linux-64/${MAMBA_VERSION} \
+      | tar -xvjf - bin/micromamba && \
+    mv bin/micromamba /usr/local/bin/micromamba && chmod +x /usr/local/bin/micromamba && \
+    micromamba shell init -s bash -p ${MAMBA_ROOT_PREFIX} >/dev/null 2>&1 || true
+
+COPY environment.yml /tmp/environment.yml
+
+# ---------- Create ds environment ----------
+RUN micromamba create -y -n ds -f /tmp/environment.yml && \
+    micromamba run -n ds pip install --no-cache-dir \
+      numpy pandas scipy scikit-learn matplotlib seaborn ipywidgets xgboost lightgbm black ruff && \
+    if [ "${ENABLE_CUDA}" = "true" ]; then \
+      micromamba run -n ds pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cu121 torch torchvision; \
+    else \
+      micromamba run -n ds pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision; \
+    fi && \
+    micromamba run -n ds python -m ipykernel install --sys-prefix --name ds --display-name "Python (ds)" && \
+    micromamba clean --all --yes
+
+# ---------- Install project-specific dependencies (optional) ----------
+COPY requirements.txt /tmp/requirements.txt
+RUN if [ -s /tmp/requirements.txt ]; then \
+      echo "Installing additional pip packages..." && \
+      micromamba run -n ds pip install --no-cache-dir -r /tmp/requirements.txt; \
+    else \
+      echo "No requirements.txt found or empty, skipping."; \
+    fi && \
+    micromamba run -n ds pip cache purge || true && \
+    micromamba clean --all --yes
+
+# ---------- Permissions for OpenShift ----------
+RUN chgrp -R 0 /opt/java /opt/conda && chmod -R g+rwX /opt/java /opt/conda
+
+FROM base AS cuda-base-amd64
+ENV NVARCH=x86_64
+# cuda-nvprof only gets installed on amd64 currently
+ENV NV_NVPROF_VERSION=12.1.105-1
+ENV NV_NVPROF_DEV_PACKAGE=cuda-nvprof-12-1-${NV_NVPROF_VERSION}
+
+ARG CUDA_SOURCE_CODE=cuda
+
+# Install CUDA base from:
+# https://gitlab.com/nvidia/container-images/cuda/-/blob/master/dist/12.6.3/ubi9/base/Dockerfile
+USER 0
+WORKDIR /opt/app-root/bin
+
+ENV NVIDIA_REQUIRE_CUDA "cuda=12.1 brand=tesla,driver>=470,driver<471 brand=unknown,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=geforce,driver>=470,driver<471 brand=geforcertx,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=titan,driver>=470,driver<471 brand=titanrtx,driver>=470,driver<471 brand=tesla,driver>=525,driver<526 brand=unknown,driver>=525,driver<526 brand=nvidia,driver>=525,driver<526 brand=nvidiartx,driver>=525,driver<526 brand=geforce,driver>=525,driver<526 brand=geforcertx,driver>=525,driver<526 brand=quadro,driver>=525,driver<526 brand=quadrortx,driver>=525,driver<526 brand=titan,driver>=525,driver<526 brand=titanrtx,driver>=525,driver<526"
+ENV NV_CUDA_CUDART_VERSION 12.1.105-1
+
+COPY ${CUDA_SOURCE_CODE}/cuda.repo-amd64 /etc/yum.repos.d/cuda.repo
+COPY ${CUDA_SOURCE_CODE}/NGC-DL-CONTAINER-LICENSE /
+
+RUN NVIDIA_GPGKEY_SUM=d0664fbbdb8c32356d45de36c5984617217b2d0bef41b93ccecd326ba3b80c87 && \
+    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/rhel9/${NVARCH}/D42D0685.pub | sed '/^Version/d' > /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA && \
+    echo "$NVIDIA_GPGKEY_SUM  /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA" | sha256sum -c --strict -
+
+ENV CUDA_VERSION=12.1.1
+
+# For libraries in the cuda-compat-* package: https://docs.nvidia.com/cuda/eula/index.html#attachment-a
+RUN yum upgrade -y && yum install -y \
+    cuda-cudart-12-1-${NV_CUDA_CUDART_VERSION} \
+    cuda-compat-12-1 \
+    && yum clean all \
+    && rm -rf /var/cache/yum/*
+
+# nvidia-docker 1.0
+RUN echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf && \
+    echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf
+
+ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+
+# nvidia-container-runtime
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Install CUDA runtime from:
+# https://gitlab.com/nvidia/container-images/cuda/-/blob/master/dist/12.6.3/ubi9/runtime/Dockerfile
+ENV NV_CUDA_LIB_VERSION 12.1.1-1
+ENV NV_NVTX_VERSION 12.1.105-1
+ENV NV_LIBNPP_VERSION 12.1.0.40-1
+ENV NV_LIBNPP_PACKAGE libnpp-12-1-${NV_LIBNPP_VERSION}
+ENV NV_LIBCUBLAS_VERSION 12.1.3.1-1
+ENV NV_LIBNCCL_PACKAGE_NAME libnccl
+ENV NV_LIBNCCL_PACKAGE_VERSION 2.17.1-1
+ENV NV_LIBNCCL_VERSION 2.17.1
+ENV NCCL_VERSION 2.17.1
+ENV NV_LIBNCCL_PACKAGE ${NV_LIBNCCL_PACKAGE_NAME}-${NV_LIBNCCL_PACKAGE_VERSION}+cuda12.1
+ 
+RUN yum install -y \
+    cuda-libraries-12-1-${NV_CUDA_LIB_VERSION} \
+    cuda-nvtx-12-1-${NV_NVTX_VERSION} \
+    ${NV_LIBNPP_PACKAGE} \
+    libcublas-12-1-${NV_LIBCUBLAS_VERSION} \
+    ${NV_LIBNCCL_PACKAGE} \
+    && yum clean all \
+    && rm -rf /var/cache/yum/*
+
+ENV XLA_FLAGS=--xla_gpu_cuda_data_dir=/usr/local/cuda
+
+# Install CUDA devel from:
+# https://gitlab.com/nvidia/container-images/cuda/-/blob/master/dist/12.1.1/ubi9/devel/Dockerfile
+ENV NV_CUDA_LIB_VERSION 12.1.1-1
+ENV NV_NVPROF_VERSION 12.1.105-1
+ENV NV_NVPROF_DEV_PACKAGE cuda-nvprof-12-1-${NV_NVPROF_VERSION}
+ENV NV_CUDA_CUDART_DEV_VERSION 12.1.105-1
+ENV NV_NVML_DEV_VERSION 12.1.105-1
+ENV NV_LIBCUBLAS_DEV_VERSION 12.1.3.1-1
+ENV NV_LIBNPP_DEV_VERSION 12.1.0.40-1
+ENV NV_LIBNPP_DEV_PACKAGE libnpp-devel-12-1-${NV_LIBNPP_DEV_VERSION}
+ENV NV_LIBNCCL_DEV_PACKAGE_NAME libnccl-devel
+ENV NV_LIBNCCL_DEV_PACKAGE_VERSION 2.17.1-1
+ENV NCCL_VERSION 2.17.1
+ENV NV_LIBNCCL_DEV_PACKAGE ${NV_LIBNCCL_DEV_PACKAGE_NAME}-${NV_LIBNCCL_DEV_PACKAGE_VERSION}+cuda12.1
+ENV NV_CUDA_NSIGHT_COMPUTE_VERSION 12.1.1-1
+ENV NV_CUDA_NSIGHT_COMPUTE_DEV_PACKAGE cuda-nsight-compute-12-1-${NV_CUDA_NSIGHT_COMPUTE_VERSION}
+ 
+RUN yum install -y \
+    make \
+    findutils \
+    cuda-command-line-tools-12-1-${NV_CUDA_LIB_VERSION} \
+    cuda-libraries-devel-12-1-${NV_CUDA_LIB_VERSION} \
+    cuda-minimal-build-12-1-${NV_CUDA_LIB_VERSION} \
+    cuda-cudart-devel-12-1-${NV_CUDA_CUDART_DEV_VERSION} \
+    ${NV_NVPROF_DEV_PACKAGE} \
+    cuda-nvml-devel-12-1-${NV_NVML_DEV_VERSION} \
+    libcublas-devel-12-1-${NV_LIBCUBLAS_DEV_VERSION} \
+    ${NV_LIBNPP_DEV_PACKAGE} \
+    ${NV_LIBNCCL_DEV_PACKAGE} \
+    ${NV_CUDA_NSIGHT_COMPUTE_DEV_PACKAGE} \
+    && yum clean all \
+    && rm -rf /var/cache/yum/*
+ 
+ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs
+ 
+# Install CUDA devel cudnn8 from:
+# https://gitlab.com/nvidia/container-images/cuda/-/blob/master/dist/12.1.1/ubi9/devel/cudnn8/Dockerfile
+ENV NV_CUDNN_VERSION 8.9.0.131-1
+ENV NV_CUDNN_PACKAGE libcudnn8-${NV_CUDNN_VERSION}.cuda12.1
+ENV NV_CUDNN_PACKAGE_DEV libcudnn8-devel-${NV_CUDNN_VERSION}.cuda12.1
+ 
+LABEL com.nvidia.cudnn.version="${NV_CUDNN_VERSION}"
+ 
+RUN yum install -y \
+    ${NV_CUDNN_PACKAGE} \
+    ${NV_CUDNN_PACKAGE_DEV} \
+    && yum clean all \
+    && rm -rf /var/cache/yum/*
+ 
+
+# Restore notebook user workspace
+USER 1001
+WORKDIR /opt/app-root/src
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+USER 1001
+WORKDIR /opt/app-root/src
+CMD ["/opt/app-root/bin/run-code-server.sh"]
